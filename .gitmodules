@@ -1,0 +1,3 @@
+[submodule "bipolar_banana"]
+	path = bipolar_banana
+	url = https://github.com/dmquant/bipolar_banana
