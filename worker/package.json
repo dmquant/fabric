@@ -1,0 +1,24 @@
+{
+  "name": "fabric-worker",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "types": "wrangler types",
+    "mock:gemini": "node scripts/gemini-analyst-mock.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241011.0",
+    "typescript": "^5.4.0",
+    "wrangler": "^3.76.0"
+  },
+  "dependencies": {
+    "@zip.js/zip.js": "^2.7.39",
+    "jszip": "^3.10.1",
+    "itty-router": "^4.0.24",
+    "nanoid": "^5.0.7",
+    "zod": "^3.23.8"
+  }
+}

@@ -1,0 +1,13 @@
+name = "fabric-worker"
+main = "src/index.ts"
+compatibility_date = "2024-10-01"
+
+[[d1_databases]]
+binding = "FABRIC_DB"
+database_name = "fabric_db"
+database_id = "database-id"
+migrations_dir = "./migrations"
+
+[[r2_buckets]]
+binding = "FABRIC_ASSETS"
+bucket_name = "fabric-assets"

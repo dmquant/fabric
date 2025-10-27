@@ -1,0 +1,8 @@
+node_modules
+.DS_Store
+wrangler-state.json
+.env.local
+*.local
+/scripts
+/.wrangler
+wrangler.toml
