@@ -1,0 +1,5 @@
+{
+  "name": "Narrator",
+  "description": "An application that takes a full report and a summary, then uses AI to generate a professional, interactive HTML visualization from the report and provides a text-to-speech narration of the summary.",
+  "requestFramePermissions": []
+}
