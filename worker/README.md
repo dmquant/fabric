@@ -1,18 +1,20 @@
 # Fabric Worker Backend
 
 ## Overview / 概述
-Fabric Worker is the shared Cloudflare Worker backend that powers the Bipolar Banana frontend and other AI-driven tools. It issues session IDs, stores metadata and logs in Cloudflare D1, archives run artifacts in Cloudflare R2, and exposes a token-protected REST API for every client.  
-Fabric Worker 是 Bipolar Banana 前端与其他 AI 工具的共享 Cloudflare Worker 后端，负责生成会话 ID，将元数据与日志写入 Cloudflare D1，把运行产物归档到 Cloudflare R2，并通过令牌保护的 REST API 为所有客户端提供服务。
+Fabric Worker is the shared Cloudflare Worker backend that powers the Bipolar Banana and Narrator frontends alongside other AI-driven tools. It issues session IDs, stores metadata and logs in Cloudflare D1, archives run artifacts in Cloudflare R2, and exposes a token-protected REST API for every client.  
+Fabric Worker 是 Bipolar Banana、Narrator 等前端应用与其他 AI 工具的共享 Cloudflare Worker 后端，负责生成会话 ID，将元数据与日志写入 Cloudflare D1，把运行产物归档到 Cloudflare R2，并通过令牌保护的 REST API 为所有客户端提供服务。
 
 ## Architecture / 架构
 ```mermaid
 graph TD
     BB[Bipolar Banana Frontend]
+    NR[Narrator Frontend]
     OC[Other Client Apps]
     Worker["Fabric Worker (Cloudflare Worker)"]
     D1[(Cloudflare D1<br/>Metadata & Logs)]
     R2[(Cloudflare R2<br/>Artifacts)]
     BB -->|REST API| Worker
+    NR -->|REST API| Worker
     OC -->|REST API| Worker
     Worker -->|Metadata Sync| D1
     Worker -->|Artifact Storage| R2
@@ -45,20 +47,20 @@ Clients call the Worker REST API; the Worker persists structured logs and metada
   # Optional: wrangler secret put FABRIC_MAX_UPLOAD_MB
   ```  
   设置必要的密钥（令牌及可选的上传限制）。
-- For each frontend (e.g., Bipolar Banana), point to the Worker by updating its `.env.local`:  
+- For each frontend (e.g., Bipolar Banana, Narrator), point to the Worker by updating its `.env.local`:  
   ```bash
   FABRIC_BASE_URL=https://<your-worker>.workers.dev
   FABRIC_TOKEN=<same-token-as-above>
   ```  
-  为每个前端（如 Bipolar Banana）在 `.env.local` 中配置 Worker 地址与令牌。
+  为每个前端（如 Bipolar Banana、Narrator）在 `.env.local` 中配置 Worker 地址与令牌。
 
 ### 3. Deploy and verify / 部署与验证
 - Start local development if needed: `npm run dev` (uses Wrangler to emulate bindings).  
   如需本地调试：`npm run dev`（Wrangler 会模拟绑定）。
 - Publish to Cloudflare: `npm run deploy`.  
   发布到 Cloudflare：`npm run deploy`。
-- Confirm the health endpoint responds with `{ "status": "ok" }` and test a full run from the Bipolar Banana frontend.  
-  验证健康检查返回 `{ "status": "ok" }` 并从 Bipolar Banana 前端完成一次完整运行测试。
+- Confirm the health endpoint responds with `{ "status": "ok" }` and test a full run from the Bipolar Banana and Narrator frontends.  
+  验证健康检查返回 `{ "status": "ok" }` 并分别从 Bipolar Banana 与 Narrator 前端完成一次完整运行测试。
 
 ## Next Steps / 后续步骤
 - Add more client adapters by following `worker/ADAPTER_GUIDE.md`.  
