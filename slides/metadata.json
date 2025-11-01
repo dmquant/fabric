@@ -1,0 +1,5 @@
+{
+  "name": "Gemini Slides",
+  "description": "A visual HTML editor powered by Gemini. Users can describe changes in natural language, and Gemini will generate the corresponding HTML and CSS, updating the visual editor in real-time.",
+  "requestFramePermissions": []
+}

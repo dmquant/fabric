@@ -1,0 +1,5 @@
+{
+  "name": "Gemini Analyst",
+  "description": "An application that generates a comprehensive, stock analysis report for a given company symbol. It plans, researches using web search, composes a report, and creates a bilingual HTML visualization with charts.",
+  "requestFramePermissions": []
+}

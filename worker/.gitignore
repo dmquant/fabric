@@ -6,3 +6,4 @@ wrangler-state.json
 /scripts
 /.wrangler
 wrangler.toml
+/tmp

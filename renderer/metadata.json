@@ -1,0 +1,5 @@
+{
+  "name": "Gemini Video Composer",
+  "description": "An application to automatically compose a video presentation from HTML slides, narration scripts, and audio files. It records each slide, synchronizes it with audio, and allows downloading the final composition as an MP4 file.",
+  "requestFramePermissions": []
+}
