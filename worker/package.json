@@ -12,12 +12,12 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241011.0",
     "typescript": "^5.4.0",
-    "wrangler": "^3.76.0"
+    "wrangler": "^4.45.4"
   },
   "dependencies": {
     "@zip.js/zip.js": "^2.7.39",
-    "jszip": "^3.10.1",
     "itty-router": "^4.0.24",
+    "jszip": "^3.10.1",
     "nanoid": "^5.0.7",
     "zod": "^3.23.8"
   }

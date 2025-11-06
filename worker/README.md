@@ -73,3 +73,15 @@ Clients call the Worker REST API; the Worker persists structured logs and metada
   按照 `worker/ADAPTER_GUIDE.md` 添加更多客户端适配器。
 - Monitor D1/R2 usage and rotate API tokens periodically.  
   监控 D1/R2 使用情况并定期轮换 API 令牌。
+
+## API Reference / 接口速查
+- `GET /health` — worker liveness.  
+  `GET /health` — 返回 Worker 健康状态。
+- `POST /sessions` — create a session with optional metadata.  
+  `POST /sessions` — 创建会话，可附带元数据。
+- `GET /sessions?appName=<name|all>` — list sessions with metadata and timestamps.  
+  `GET /sessions?appName=<name|all>` — 返回会话详情列表（含元数据与时间戳）。
+- `GET /sessions/:sessionId/assets` — list stored assets for a session.  
+  `GET /sessions/:sessionId/assets` — 查看指定会话的资产列表。
+- `GET /sessions/:sessionId/assets/archive` — download a zip of all assets for a session.  
+  `GET /sessions/:sessionId/assets/archive` — 将指定会话的所有资产打包下载。
