@@ -1,6 +1,6 @@
 import { Router } from 'itty-router';
 import { customAlphabet } from 'nanoid';
-import { ZipReader, Uint8ArrayReader, Uint8ArrayWriter } from '@zip.js/zip.js';
+import { BlobWriter, ZipReader, ZipWriter, Uint8ArrayReader, Uint8ArrayWriter } from '@zip.js/zip.js';
 import { z } from 'zod';
 
 type D1Result<T> = T & Record<string, unknown>;
@@ -92,6 +92,41 @@ router.post('/sessions', withErrorHandling(withAuth(async (request, env, _ctx, a
     .run();
 
   return jsonResponse({ sessionId }, 201);
+})));
+
+router.get('/sessions', withErrorHandling(withAuth(async (request, env, _ctx, auth) => {
+  const url = new URL(request.url);
+  const appNameParam = url.searchParams.get('appName');
+  const filterAppName =
+    appNameParam && appNameParam.trim().toLowerCase() !== 'all' ? appNameParam.trim() : null;
+
+  const statement = filterAppName
+    ? env.FABRIC_DB.prepare(
+        `SELECT id, app_name, status, metadata, created_at, updated_at
+         FROM sessions
+         WHERE token_id = ?1 AND app_name = ?2
+         ORDER BY updated_at DESC`
+      ).bind(auth.tokenHash, filterAppName)
+    : env.FABRIC_DB.prepare(
+        `SELECT id, app_name, status, metadata, created_at, updated_at
+         FROM sessions
+         WHERE token_id = ?1
+         ORDER BY updated_at DESC`
+      ).bind(auth.tokenHash);
+
+  const rows = await statement.all();
+
+  return jsonResponse({
+    sessions:
+      rows.results?.map((row: any) => ({
+        sessionId: row.id,
+        appName: row.app_name,
+        metadata: row.metadata ? tryParseJson(row.metadata) : null,
+        status: row.status,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      })) ?? [],
+  });
 })));
 
 router.post('/sessions/:sessionId/logs', withErrorHandling(withAuth(async (request, env, _ctx, auth) => {
@@ -316,6 +351,62 @@ router.get('/sessions/:sessionId/assets', withErrorHandling(withAuth(async (requ
       downloadUrl: `/sessions/${sessionId}/assets/${encodeURIComponent(row.filename)}`,
     })) ?? [],
   });
+})));
+
+router.get('/sessions/:sessionId/assets/archive', withErrorHandling(withAuth(async (request, env, _ctx, auth) => {
+  const params = (request as any).params as { sessionId?: string };
+  const sessionId = params?.sessionId;
+  if (!sessionId) {
+    return jsonError(400, 'Missing session id');
+  }
+
+  if (!env.FABRIC_ASSETS) {
+    console.error('FABRIC_ASSETS binding missing');
+    return jsonError(500, 'Asset storage unavailable');
+  }
+
+  const session = await loadSession(env, sessionId, auth.tokenHash);
+  if (!session) {
+    return jsonError(404, 'Session not found');
+  }
+
+  const rows = await env.FABRIC_DB.prepare(
+    `SELECT filename, object_key FROM assets WHERE session_id = ?1 ORDER BY filename`
+  )
+    .bind(sessionId)
+    .all();
+
+  const assetRows = rows.results ?? [];
+  if (assetRows.length === 0) {
+    return jsonError(404, 'No assets found for session');
+  }
+
+  const blobWriter = new BlobWriter('application/zip');
+  const zipWriter = new ZipWriter(blobWriter);
+
+  try {
+    for (const row of assetRows) {
+      const object = await env.FABRIC_ASSETS.get(row.object_key);
+      if (!object) {
+        console.error('Asset missing in R2', { sessionId, objectKey: row.object_key });
+        return jsonError(500, 'Asset storage inconsistent');
+      }
+
+      const arrayBuffer = await object.arrayBuffer();
+      await zipWriter.add(row.filename, new Uint8ArrayReader(new Uint8Array(arrayBuffer)));
+    }
+  } finally {
+    await zipWriter.close();
+  }
+
+  const archive = await blobWriter.getData();
+  const headers = new Headers({
+    ...CORS_HEADERS,
+    'Content-Type': 'application/zip',
+    'Content-Disposition': `attachment; filename="${encodeURIComponent(sessionId)}.zip"`,
+  });
+
+  return new Response(archive, { status: 200, headers });
 })));
 
 router.get('/sessions/:sessionId/assets/:assetName+', withErrorHandling(withAuth(async (request, env, _ctx, auth) => {
