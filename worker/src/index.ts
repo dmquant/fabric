@@ -36,13 +36,36 @@ interface AssetRow {
   checksum: string | null;
 }
 
+interface AppStorageLogRow {
+  id: string;
+  app_name: string;
+  level: string;
+  message: string;
+  metadata: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface AppStorageObjectRow {
+  app_name: string;
+  object_key: string;
+  filename: string;
+  content_type: string | null;
+  size: number;
+  checksum: string | null;
+  metadata: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Requested-With',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
 };
 
 const generateSessionId = customAlphabet('23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz', 20);
+const generateAppLogId = customAlphabet('23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz', 24);
 
 const createSessionSchema = z.object({
   appName: z.string().min(1).max(128),
@@ -60,6 +83,23 @@ const logsSchema = z.object({
     )
     .min(1),
 });
+
+const appLogEntrySchema = z.object({
+  level: z.string().min(1).max(32).optional(),
+  message: z.string().min(1),
+  metadata: z.record(z.any()).optional(),
+});
+
+const appLogUpdateSchema = z
+  .object({
+    level: z.string().min(1).max(32).optional(),
+    message: z.string().min(1).optional(),
+    metadata: z.union([z.record(z.any()), z.null()]).optional(),
+  })
+  .refine(
+    (data) => data.level !== undefined || data.message !== undefined || data.metadata !== undefined,
+    { message: 'At least one field must be provided' }
+  );
 
 const router = Router();
 
@@ -127,6 +167,448 @@ router.get('/sessions', withErrorHandling(withAuth(async (request, env, _ctx, au
         updatedAt: row.updated_at,
       })) ?? [],
   });
+})));
+
+router.get('/apps/:appName/storage/logs', withErrorHandling(withAuth(async (request, env) => {
+  const params = (request as any).params as { appName?: string };
+  const appName = sanitiseAppName(params?.appName);
+  if (!appName) {
+    return jsonError(400, 'Invalid app name');
+  }
+
+  const url = new URL(request.url);
+  const limit = parseLimit(url.searchParams.get('limit'));
+  const cursor = url.searchParams.get('cursor')?.trim() || null;
+
+  let query = `SELECT id, app_name, level, message, metadata, created_at, updated_at
+               FROM app_storage_logs
+               WHERE app_name = ?`;
+  const bindings: unknown[] = [appName];
+  if (cursor) {
+    query += ` AND created_at < ?`;
+    bindings.push(cursor);
+  }
+  query += ` ORDER BY created_at DESC LIMIT ?`;
+  bindings.push(limit);
+
+  const rows = await env.FABRIC_DB.prepare(query).bind(...bindings).all();
+  const results = (rows.results ?? []) as AppStorageLogRow[];
+  const nextCursor = results.length === limit ? results[results.length - 1].created_at : null;
+
+  return jsonResponse({
+    logs: results.map(formatAppStorageLog),
+    nextCursor,
+  });
+})));
+
+router.post('/apps/:appName/storage/logs', withErrorHandling(withAuth(async (request, env) => {
+  const params = (request as any).params as { appName?: string };
+  const appName = sanitiseAppName(params?.appName);
+  if (!appName) {
+    return jsonError(400, 'Invalid app name');
+  }
+
+  const body = await parseJson(request);
+  const parsed = appLogEntrySchema.safeParse(body);
+  if (!parsed.success) {
+    return jsonError(400, 'Invalid payload', parsed.error.flatten());
+  }
+
+  const logId = generateAppLogId();
+  const metadataString =
+    parsed.data.metadata === undefined ? null : JSON.stringify(parsed.data.metadata);
+
+  await env.FABRIC_DB.prepare(
+    `INSERT INTO app_storage_logs (id, app_name, level, message, metadata)
+     VALUES (?1, ?2, ?3, ?4, ?5)`
+  )
+    .bind(logId, appName, parsed.data.level ?? 'info', parsed.data.message, metadataString)
+    .run();
+
+  const stored = await env.FABRIC_DB.prepare(
+    `SELECT id, app_name, level, message, metadata, created_at, updated_at
+     FROM app_storage_logs
+     WHERE app_name = ?1 AND id = ?2`
+  )
+    .bind(appName, logId)
+    .first<AppStorageLogRow>();
+
+  if (!stored) {
+    return jsonError(500, 'Failed to save log entry');
+  }
+
+  return jsonResponse({ log: formatAppStorageLog(stored) }, 201);
+})));
+
+router.put('/apps/:appName/storage/logs/:logId', withErrorHandling(withAuth(async (request, env) => {
+  const params = (request as any).params as { appName?: string; logId?: string };
+  const appName = sanitiseAppName(params?.appName);
+  const logId = params?.logId;
+  if (!appName || !logId) {
+    return jsonError(400, 'Invalid app name or log id');
+  }
+
+  const existing = await env.FABRIC_DB.prepare(
+    `SELECT id, app_name, level, message, metadata, created_at, updated_at
+     FROM app_storage_logs
+     WHERE app_name = ?1 AND id = ?2`
+  )
+    .bind(appName, logId)
+    .first<AppStorageLogRow>();
+
+  if (!existing) {
+    return jsonError(404, 'Log not found');
+  }
+
+  const body = await parseJson(request);
+  const parsed = appLogUpdateSchema.safeParse(body);
+  if (!parsed.success) {
+    return jsonError(400, 'Invalid payload', parsed.error.flatten());
+  }
+
+  const updates: string[] = [];
+  const bindings: unknown[] = [];
+
+  if (parsed.data.level !== undefined) {
+    updates.push('level = ?');
+    bindings.push(parsed.data.level);
+  }
+  if (parsed.data.message !== undefined) {
+    updates.push('message = ?');
+    bindings.push(parsed.data.message);
+  }
+  if (parsed.data.metadata !== undefined) {
+    const metadataString =
+      parsed.data.metadata === null ? null : JSON.stringify(parsed.data.metadata);
+    updates.push('metadata = ?');
+    bindings.push(metadataString);
+  }
+
+  updates.push(`updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`);
+
+  await env.FABRIC_DB.prepare(
+    `UPDATE app_storage_logs
+     SET ${updates.join(', ')}
+     WHERE app_name = ? AND id = ?`
+  )
+    .bind(...bindings, appName, logId)
+    .run();
+
+  const updated = await env.FABRIC_DB.prepare(
+    `SELECT id, app_name, level, message, metadata, created_at, updated_at
+     FROM app_storage_logs
+     WHERE app_name = ?1 AND id = ?2`
+  )
+    .bind(appName, logId)
+    .first<AppStorageLogRow>();
+
+  if (!updated) {
+    return jsonError(404, 'Log not found');
+  }
+
+  return jsonResponse({ log: formatAppStorageLog(updated) });
+})));
+
+router.delete('/apps/:appName/storage/logs/:logId', withErrorHandling(withAuth(async (request, env) => {
+  const params = (request as any).params as { appName?: string; logId?: string };
+  const appName = sanitiseAppName(params?.appName);
+  const logId = params?.logId;
+  if (!appName || !logId) {
+    return jsonError(400, 'Invalid app name or log id');
+  }
+
+  const existing = await env.FABRIC_DB.prepare(
+    `SELECT id FROM app_storage_logs WHERE app_name = ?1 AND id = ?2`
+  )
+    .bind(appName, logId)
+    .first<AppStorageLogRow>();
+
+  if (!existing) {
+    return jsonError(404, 'Log not found');
+  }
+
+  await env.FABRIC_DB.prepare(`DELETE FROM app_storage_logs WHERE app_name = ?1 AND id = ?2`)
+    .bind(appName, logId)
+    .run();
+
+  return jsonResponse({ deleted: true });
+})));
+
+router.get('/apps/:appName/storage/objects', withErrorHandling(withAuth(async (request, env) => {
+  const params = (request as any).params as { appName?: string };
+  const appName = sanitiseAppName(params?.appName);
+  if (!appName) {
+    return jsonError(400, 'Invalid app name');
+  }
+
+  const rows = await env.FABRIC_DB.prepare(
+    `SELECT app_name, object_key, filename, content_type, size, checksum, metadata, created_at, updated_at
+     FROM app_storage_objects
+     WHERE app_name = ?1
+     ORDER BY filename`
+  )
+    .bind(appName)
+    .all();
+
+  return jsonResponse({
+    objects: (rows.results ?? []).map((row: any) => formatAppStorageObject(row as AppStorageObjectRow, appName)),
+  });
+})));
+
+router.post('/apps/:appName/storage/objects', withErrorHandling(withAuth(async (request, env) => {
+  const params = (request as any).params as { appName?: string };
+  const appName = sanitiseAppName(params?.appName);
+  if (!appName) {
+    return jsonError(400, 'Invalid app name');
+  }
+
+  if (!env.FABRIC_ASSETS) {
+    console.error('FABRIC_ASSETS binding missing');
+    return jsonError(500, 'Asset storage unavailable');
+  }
+
+  const contentType = request.headers.get('content-type') ?? '';
+  if (!contentType.includes('application/zip')) {
+    return jsonError(415, 'Expected application/zip payload');
+  }
+
+  const uploadLimitBytes = getUploadLimitBytes(env);
+  const payload = await request.arrayBuffer();
+  if (payload.byteLength > uploadLimitBytes) {
+    return jsonError(413, `Payload too large (>${(uploadLimitBytes / (1024 * 1024)).toFixed(0)} MiB)`);
+  }
+
+  const reader = new ZipReader(new Uint8ArrayReader(new Uint8Array(payload)));
+  const storedObjects: AppStorageObjectRow[] = [];
+
+  try {
+    const entries = await reader.getEntries();
+    if (!entries || entries.length === 0) {
+      return jsonError(400, 'Zip archive contained no files');
+    }
+
+    for (const entry of entries) {
+      if (entry.directory) {
+        continue;
+      }
+
+      const sanitisedName = sanitisePath(entry.filename);
+      if (!sanitisedName) {
+        return jsonError(400, `Unsupported entry path: ${entry.filename}`);
+      }
+
+      const writer = new Uint8ArrayWriter();
+      const bytes = await entry.getData(writer);
+      const objectKey = buildAppObjectKey(appName, sanitisedName);
+      const content = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      const detectedContentType = guessContentType(sanitisedName) ?? 'application/octet-stream';
+      const checksum = await sha256Hex(bytes);
+
+      try {
+        await env.FABRIC_ASSETS.put(objectKey, content, {
+          httpMetadata: { contentType: detectedContentType },
+          customMetadata: {
+            appName,
+            filename: sanitisedName,
+            checksum,
+          },
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('R2 upload failed (app storage)', { appName, sanitisedName, message });
+        return jsonError(500, 'Failed to store asset', { filename: sanitisedName });
+      }
+
+      storedObjects.push({
+        app_name: appName,
+        object_key: objectKey,
+        filename: sanitisedName,
+        content_type: detectedContentType,
+        size: bytes.byteLength,
+        checksum,
+        metadata: null,
+        created_at: '',
+        updated_at: '',
+      });
+    }
+  } finally {
+    await reader.close();
+  }
+
+  if (storedObjects.length === 0) {
+    return jsonError(400, 'Zip archive contained no files');
+  }
+
+  const statements = storedObjects.map((object) =>
+    env.FABRIC_DB.prepare(
+      `INSERT INTO app_storage_objects (app_name, object_key, filename, content_type, size, checksum, metadata)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+       ON CONFLICT(app_name, filename) DO UPDATE SET
+         object_key = excluded.object_key,
+         content_type = excluded.content_type,
+         size = excluded.size,
+         checksum = excluded.checksum,
+         metadata = excluded.metadata,
+         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`
+    ).bind(
+      object.app_name,
+      object.object_key,
+      object.filename,
+      object.content_type,
+      object.size,
+      object.checksum,
+      object.metadata
+    )
+  );
+
+  await env.FABRIC_DB.batch(statements);
+
+  return jsonResponse({ stored: storedObjects.length });
+})));
+
+router.get('/apps/:appName/storage/objects/archive', withErrorHandling(withAuth(async (request, env) => {
+  const params = (request as any).params as { appName?: string };
+  const appName = sanitiseAppName(params?.appName);
+  if (!appName) {
+    return jsonError(400, 'Invalid app name');
+  }
+
+  if (!env.FABRIC_ASSETS) {
+    console.error('FABRIC_ASSETS binding missing');
+    return jsonError(500, 'Asset storage unavailable');
+  }
+
+  const rows = await env.FABRIC_DB.prepare(
+    `SELECT filename, object_key FROM app_storage_objects WHERE app_name = ?1 ORDER BY filename`
+  )
+    .bind(appName)
+    .all();
+
+  const objectRows = rows.results ?? [];
+  if (objectRows.length === 0) {
+    return jsonError(404, 'No stored objects for app');
+  }
+
+  const blobWriter = new BlobWriter('application/zip');
+  const zipWriter = new ZipWriter(blobWriter);
+
+  try {
+    for (const row of objectRows) {
+      const object = await env.FABRIC_ASSETS.get(row.object_key);
+      if (!object) {
+        console.error('App storage object missing in R2', { appName, objectKey: row.object_key });
+        return jsonError(500, 'Asset storage inconsistent');
+      }
+
+      const arrayBuffer = await object.arrayBuffer();
+      await zipWriter.add(row.filename, new Uint8ArrayReader(new Uint8Array(arrayBuffer)));
+    }
+  } finally {
+    await zipWriter.close();
+  }
+
+  const archive = await blobWriter.getData();
+  const headers = new Headers({
+    ...CORS_HEADERS,
+    'Content-Type': 'application/zip',
+    'Content-Disposition': `attachment; filename="${encodeURIComponent(appName)}-storage.zip"`,
+  });
+
+  return new Response(archive, { status: 200, headers });
+})));
+
+router.get('/apps/:appName/storage/objects/:objectName+', withErrorHandling(withAuth(async (request, env) => {
+  const params = (request as any).params as { appName?: string; objectName?: string };
+  const appName = sanitiseAppName(params?.appName);
+  const objectName = params?.objectName;
+  if (!appName || !objectName) {
+    return jsonError(400, 'Invalid app name or object name');
+  }
+
+  if (!env.FABRIC_ASSETS) {
+    console.error('FABRIC_ASSETS binding missing');
+    return jsonError(500, 'Asset storage unavailable');
+  }
+
+  const sanitisedName = sanitisePath(objectName);
+  if (!sanitisedName) {
+    return jsonError(400, 'Invalid object name');
+  }
+
+  const record = await env.FABRIC_DB.prepare(
+    `SELECT app_name, object_key, filename, content_type, size, checksum, metadata, created_at, updated_at
+     FROM app_storage_objects
+     WHERE app_name = ?1 AND filename = ?2`
+  )
+    .bind(appName, sanitisedName)
+    .first<AppStorageObjectRow>();
+
+  if (!record) {
+    return jsonError(404, 'Object not found');
+  }
+
+  const asset = await env.FABRIC_ASSETS.get(record.object_key);
+  if (!asset) {
+    console.error('App storage object missing in R2', { appName, objectKey: record.object_key });
+    return jsonError(404, 'Object not found');
+  }
+
+  const headers = new Headers({ ...CORS_HEADERS });
+  if (asset.httpMetadata?.contentType) {
+    headers.set('Content-Type', asset.httpMetadata.contentType);
+  }
+  if (asset.httpMetadata?.contentDisposition) {
+    headers.set('Content-Disposition', asset.httpMetadata.contentDisposition);
+  } else {
+    headers.set('Content-Disposition', `inline; filename="${encodeURIComponent(record.filename)}"`);
+  }
+  if (asset.range) {
+    headers.set('Content-Range', asset.range);
+  }
+  if (asset.size !== undefined) {
+    headers.set('Content-Length', asset.size.toString());
+  }
+  if (asset.etag) {
+    headers.set('ETag', asset.etag);
+  }
+
+  return new Response(asset.body, { status: 200, headers });
+})));
+
+router.delete('/apps/:appName/storage/objects/:objectName+', withErrorHandling(withAuth(async (request, env) => {
+  const params = (request as any).params as { appName?: string; objectName?: string };
+  const appName = sanitiseAppName(params?.appName);
+  const objectName = params?.objectName;
+  if (!appName || !objectName) {
+    return jsonError(400, 'Invalid app name or object name');
+  }
+
+  if (!env.FABRIC_ASSETS) {
+    console.error('FABRIC_ASSETS binding missing');
+    return jsonError(500, 'Asset storage unavailable');
+  }
+
+  const sanitisedName = sanitisePath(objectName);
+  if (!sanitisedName) {
+    return jsonError(400, 'Invalid object name');
+  }
+
+  const record = await env.FABRIC_DB.prepare(
+    `SELECT object_key FROM app_storage_objects WHERE app_name = ?1 AND filename = ?2`
+  )
+    .bind(appName, sanitisedName)
+    .first<AppStorageObjectRow>();
+
+  if (!record) {
+    return jsonError(404, 'Object not found');
+  }
+
+  await env.FABRIC_ASSETS.delete(record.object_key);
+  await env.FABRIC_DB.prepare(`DELETE FROM app_storage_objects WHERE app_name = ?1 AND filename = ?2`)
+    .bind(appName, sanitisedName)
+    .run();
+
+  return jsonResponse({ deleted: true });
 })));
 
 router.post('/sessions/:sessionId/logs', withErrorHandling(withAuth(async (request, env, _ctx, auth) => {
@@ -568,6 +1050,60 @@ function applyCors(response: Response): Response {
 
 function jsonError(status: number, message: string, details?: unknown): Response {
   return jsonResponse({ error: message, details }, status);
+}
+
+function parseLimit(value: string | null, fallback = 50, min = 1, max = 100): number {
+  if (!value) {
+    return fallback;
+  }
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+  return Math.max(min, Math.min(max, Math.floor(numeric)));
+}
+
+function sanitiseAppName(value?: string): string | null {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (!/^[A-Za-z0-9._-]{1,128}$/.test(trimmed)) {
+    return null;
+  }
+  return trimmed;
+}
+
+function formatAppStorageLog(row: AppStorageLogRow) {
+  return {
+    id: row.id,
+    appName: row.app_name,
+    level: row.level,
+    message: row.message,
+    metadata: row.metadata ? tryParseJson(row.metadata) : null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function formatAppStorageObject(row: AppStorageObjectRow, appName: string) {
+  return {
+    filename: row.filename,
+    contentType: row.content_type,
+    size: row.size,
+    checksum: row.checksum,
+    metadata: row.metadata ? tryParseJson(row.metadata) : null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    downloadUrl: `/apps/${encodeURIComponent(appName)}/storage/objects/${encodeURIComponent(row.filename)}`,
+  };
+}
+
+function buildAppObjectKey(appName: string, filename: string): string {
+  return `apps/${appName}/${filename}`;
 }
 
 async function loadSession(env: Env, sessionId: string, expectedTokenHash: string): Promise<SessionRow | null> {

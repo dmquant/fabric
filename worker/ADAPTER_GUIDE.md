@@ -102,6 +102,36 @@ You can read back stored data to confirm ingest or power dashboards:
 
 By encapsulating these steps in a reusable module, each new Fabric app can onboard quickly while adhering to the shared Worker contract.
 
+## App-Managed Persistent Storage (Sessionless)
+Some apps need to persist artifacts outside a session—for example, reusable prompts, downloadable bundles, or shared configuration. The Worker now exposes token-protected endpoints that let you manage D1 logs and R2 objects per `appName` without creating a session.
+
+### D1 Log Endpoints
+- `GET /apps/:appName/storage/logs?limit=<1-100>&cursor=<ISO>` paginates log history (descending by `createdAt`). Use the returned `nextCursor` to continue.
+- `POST /apps/:appName/storage/logs` inserts a log entry:
+
+```json
+{
+  "level": "info",
+  "message": "download ready",
+  "metadata": { "artifact": "run-2024-05-01.zip" }
+}
+```
+
+- `PUT /apps/:appName/storage/logs/:logId` updates `level`, `message`, and/or `metadata`.
+- `DELETE /apps/:appName/storage/logs/:logId` removes an entry entirely.
+
+### R2 Object Endpoints (Zip In/Out)
+- `POST /apps/:appName/storage/objects` accepts an `application/zip` payload, unpacks each file, sanitizes the path, and stores it under `apps/<appName>/<filename>` in R2.
+- `GET /apps/:appName/storage/objects` returns metadata plus Worker download URLs for every stored object.
+- `GET /apps/:appName/storage/objects/archive` streams a freshly zipped bundle of all stored files—ideal for the "download everything" button in local mode.
+- `GET /apps/:appName/storage/objects/:objectName` downloads a single asset; `DELETE` on the same path removes it from both R2 and D1.
+
+### Suggested Usage Patterns
+- **Local download mode**: call `/apps/:appName/storage/objects/archive` once a run finishes to provide users with a single ZIP that already contains execution logs, markdown, code, images, and audio.
+- **Cloudflare download mode**: expose UI fields for `FABRIC_BASE_URL` and `FABRIC_TOKEN`, then call the same endpoints above against the deployed Worker so users can manage artifacts remotely without copying secrets into the binary.
+
+All of these endpoints require the same bearer token, so reuse your adapter's authentication helper and continue avoiding logging the secret.
+
 
 [Prompt]
 let's add download module:

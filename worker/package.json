@@ -7,7 +7,8 @@
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "types": "wrangler types",
-    "mock:gemini": "node scripts/gemini-analyst-mock.mjs"
+    "mock:gemini": "node scripts/gemini-analyst-mock.mjs",
+    "test:app-storage": "node scripts/test-app-storage.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241011.0",

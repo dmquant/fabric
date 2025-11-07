@@ -85,3 +85,15 @@ Clients call the Worker REST API; the Worker persists structured logs and metada
   `GET /sessions/:sessionId/assets` — 查看指定会话的资产列表。
 - `GET /sessions/:sessionId/assets/archive` — download a zip of all assets for a session.  
   `GET /sessions/:sessionId/assets/archive` — 将指定会话的所有资产打包下载。
+- `GET /apps/:appName/storage/logs?limit=<1-100>&cursor=<ISO>` — list app-managed log entries (sessionless).  
+  `GET /apps/:appName/storage/logs?limit=<1-100>&cursor=<ISO>` — 列出某个应用的持久日志。  
+- `POST /apps/:appName/storage/logs` — insert a log entry; `PUT /apps/:appName/storage/logs/:logId` updates it; `DELETE /apps/:appName/storage/logs/:logId` removes it.  
+  `POST /apps/:appName/storage/logs` — 新增日志；`PUT /apps/:appName/storage/logs/:logId` 更新；`DELETE ...` 删除。  
+- `POST /apps/:appName/storage/objects` — upload a ZIP archive to unpack into app-specific R2 objects (no session required).  
+  `POST /apps/:appName/storage/objects` — 上传 ZIP 自动解压到应用私有 R2 空间。  
+- `GET /apps/:appName/storage/objects` — list stored objects with download URLs.  
+  `GET /apps/:appName/storage/objects` — 查看应用资产列表并获取下载链接。  
+- `GET /apps/:appName/storage/objects/archive` — download all app objects as a zip;  
+  `GET /apps/:appName/storage/objects/archive` — 将应用资产整体打包下载。  
+- `GET /apps/:appName/storage/objects/:objectName` & `DELETE /apps/:appName/storage/objects/:objectName` — fetch or remove a single stored object.  
+  `GET /apps/:appName/storage/objects/:objectName` 与 `DELETE ...` — 获取或删除单个资产。
