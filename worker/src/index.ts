@@ -1090,6 +1090,7 @@ function formatAppStorageLog(row: AppStorageLogRow) {
 }
 
 function formatAppStorageObject(row: AppStorageObjectRow, appName: string) {
+  const encodedFilename = encodePathSegments(row.filename);
   return {
     filename: row.filename,
     contentType: row.content_type,
@@ -1098,12 +1099,19 @@ function formatAppStorageObject(row: AppStorageObjectRow, appName: string) {
     metadata: row.metadata ? tryParseJson(row.metadata) : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    downloadUrl: `/apps/${encodeURIComponent(appName)}/storage/objects/${encodeURIComponent(row.filename)}`,
+    downloadUrl: `/apps/${encodeURIComponent(appName)}/storage/objects/${encodedFilename}`,
   };
 }
 
 function buildAppObjectKey(appName: string, filename: string): string {
   return `apps/${appName}/${filename}`;
+}
+
+function encodePathSegments(path: string): string {
+  return path
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
 }
 
 async function loadSession(env: Env, sessionId: string, expectedTokenHash: string): Promise<SessionRow | null> {
